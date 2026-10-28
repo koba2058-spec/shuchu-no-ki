@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="集中の木">
+<meta name="theme-color" content="#0B140F">
+<title>集中の木</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@700;900&family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@500&display=swap">
+<style>
+/* One-screen camera app: the canvas IS the recording (camera + timer + tree); DOM controls float above and are never recorded */
+:root{
+  --bg:#0B140F; --panel:rgba(14,24,19,.86); --ink:#F1F6F2; --muted:#A5B6AC; --line:rgba(255,255,255,.14);
+  --leaf:#5BC184; --sun:#F2BA4E; --rec:#F0524A; --rest:#7FB0DD;
+  --f-display:"Zen Maru Gothic","Hiragino Maru Gothic ProN",system-ui,sans-serif;
+  --f-body:"Noto Sans JP","Hiragino Sans",system-ui,sans-serif;
+  --f-num:"DM Mono",ui-monospace,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--f-body);overflow:hidden;overscroll-behavior:none}
+#stage{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:block;background:var(--bg)}
+#cam{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
+[hidden]{display:none!important}
+
+.ui{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:flex-end;
+  padding:calc(env(safe-area-inset-top,0px) + 12px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 16px) max(16px,env(safe-area-inset-left,0px))}
+.ui > *{pointer-events:auto}
+.top-actions{position:fixed;top:calc(env(safe-area-inset-top,0px) + 130px);right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:10px}
+.icon{width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:700 12px var(--f-body);display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(8px)}
+.bar{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+.btn{font:700 17px var(--f-body);border:0;border-radius:18px;padding:16px 18px;cursor:pointer;background:var(--leaf);color:#06210F}
+.btn.ghost{background:var(--panel);color:var(--ink);border:1px solid var(--line);font-weight:500;font-size:14px;backdrop-filter:blur(8px)}
+.btn.rest{background:var(--rest);color:#071A2B}
+.btn:disabled{opacity:.5}
+button:focus-visible,input:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:5}
+.sheet-in{width:100%;max-width:520px;background:#132019;border-top-left-radius:22px;border-top-right-radius:22px;
+  padding:20px max(18px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 20px) max(18px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px;max-height:92%;overflow:auto}
+.sheet h2{font:900 20px var(--f-display);margin:0}
+.sheet p{margin:0;font-size:13px;color:var(--muted);line-height:1.7}
+.group{display:flex;flex-direction:column;gap:8px}
+.group > span{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.04em}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{font:500 14px var(--f-body);border:1px solid var(--line);background:transparent;color:var(--ink);padding:8px 14px;border-radius:99px;cursor:pointer}
+.chip[aria-pressed="true"]{border-color:var(--leaf);background:rgba(91,193,132,.16);color:var(--leaf);font-weight:700}
+input[type=text]{font:500 16px var(--f-body);color:var(--ink);background:#0B140F;border:1px solid var(--line);border-radius:12px;padding:10px 12px;width:100%}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:14px}
+.toggle input{width:22px;height:22px;accent-color:var(--leaf)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:#0B140F;border-radius:12px;padding:10px;text-align:center}
+.stat b{display:block;font:500 20px var(--f-num)}
+.stat span{font-size:11px;color:var(--muted)}
+
+.result video{width:100%;max-height:52vh;aspect-ratio:9/16;object-fit:contain;background:#000;border-radius:14px}
+.progress{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.progress i{display:block;height:100%;width:0;background:var(--leaf)}
+.status{font-size:13px;color:var(--muted);min-height:1.5em}
+.status.err{color:var(--rec)}
+.welcome h2{font-size:24px}
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="stage" width="720" height="1280" aria-label="録画される画面"></canvas>
+
+<div class="top-actions">
+  <button class="icon" id="flipBtn" aria-label="カメラ切替">切替</button>
+  <button class="icon" id="setBtn" aria-label="設定">設定</button>
+</div>
+
+<div class="ui">
+  <div class="bar">
+    <button class="btn ghost" id="resetBtn">リセット</button>
+    <button class="btn" id="startBtn">集中スタート</button>
+    <button class="btn ghost" id="statsBtn">記録</button>
+  </div>
+</div>
+
+<!-- welcome -->
+<div class="sheet welcome" id="welcome">
+  <div class="sheet-in">
+    <h2>集中の木</h2>
+    <p>25分集中して、5分休む。集中するほど木が育ちます。<br>カメラに映った自分とタイマーを同時に記録して、終わったら自動で早送り動画（リール・ショート用）にします。</p>
+    <p>録画中はiPhoneの画面をつけたまま、このアプリを開いたままにしてください。スタンドに立てて使うのがおすすめです。</p>
+    <button class="btn" id="camOnBtn">カメラをオンにして始める</button>
+    <button class="btn ghost" id="noCamBtn">カメラなしで使う</button>
+    <div class="status" id="welcomeStatus" role="status"></div>
+  </div>
+</div>
+
+<!-- settings -->
+<div class="sheet" id="settings" hidden>
+  <div class="sheet-in">
+    <h2>設定</h2>
+    <div class="group"><span>時間</span>
+      <div class="chips" id="presetChips">
+        <button class="chip" data-v="0">25分 / 5分</button>
+        <button class="chip" data-v="1">50分 / 10分</button>
+        <button class="chip" data-v="2">お試し（20秒）</button>
+      </div></div>
+    <div class="group"><span>早送り動画の長さ</span>
+      <div class="chips" id="lenChips">
+        <button class="chip" data-v="15">15秒</button>
+        <button class="chip" data-v="30">30秒</button>
+        <button class="chip" data-v="60">60秒</button>
+      </div></div>
+    <label class="group" for="hookIn"><span>動画の冒頭テキスト（最初の2秒に表示）</span>
+      <input type="text" id="hookIn" maxlength="22"></label>
+    <label class="toggle" for="recToggle">集中中に録画する<input type="checkbox" id="recToggle"></label>
+    <label class="toggle" for="mirrorToggle">インカメラを鏡のように反転<input type="checkbox" id="mirrorToggle"></label>
+    <button class="btn" id="setClose">閉じる</button>
+  </div>
+</div>
+
+<!-- stats -->
+<div class="sheet" id="statsSheet" hidden>
+  <div class="sheet-in">
+    <h2>これまでの記録</h2>
+    <div class="stats">
+      <div class="stat"><b id="sTotal">0</b><span>累計集中（分）</span></div>
+      <div class="stat"><b id="sSets">0</b><span>累計セット</span></div>
+      <div class="stat"><b id="sBest">0</b><span>最長連続（日）</span></div>
+    </div>
+    <p id="stageLine"></p>
+    <p>1分集中＝1XP、セット完了で+10XP、3日以上連続で+5XP。<br>Lv2 芽 → Lv4 若葉 → Lv7 若木 → Lv12 木 → Lv20 花咲く木 → Lv30 実のなる木</p>
+    <button class="btn" id="statsClose">閉じる</button>
+  </div>
+</div>
+
+<!-- result -->
+<div class="sheet result" id="result" hidden>
+  <div class="sheet-in">
+    <h2 id="resTitle">早送り動画をつくっています</h2>
+    <div class="progress" id="resProg"><i></i></div>
+    <video id="resVideo" playsinline controls loop muted hidden></video>
+    <div class="status" id="resStatus" role="status"></div>
+    <button class="btn" id="shareBtn" hidden>写真に保存・シェア</button>
+    <button class="btn ghost" id="resClose" hidden>閉じて休憩へ</button>
+  </div>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const stage = $("stage"), ctx = stage.getContext("2d");
+const cam = $("cam");
+const W = 720, H = 1280;
+
+// ---------------- growth model ----------------
+const STAGES = [{lv:1,name:"種"},{lv:2,name:"芽"},{lv:4,name:"若葉"},{lv:7,name:"若木"},{lv:12,name:"木"},{lv:20,name:"花咲く木"},{lv:30,name:"実のなる木"}];
+const need = lv => 20 + lv * 10;
+function levelInfo(total){ let lv=1, r=total; while (r >= need(lv)) { r -= need(lv); lv++; } return {lv, xpIn:r, xpNeed:need(lv), g:(lv-1)+r/need(lv)}; }
+const stageOf = lv => STAGES.filter(s => lv >= s.lv).pop();
+
+// ---------------- storage ----------------
+const KEY = "shuchu-no-ki-v1";
+const blank = {totalXp:0,totalMin:0,sets:0,streak:0,best:0,lastDay:"",todayDay:"",todaySets:0,
+  preset:0,vlen:30,hook:"25分、本気で集中してみた。",rec:true,mirror:true,facing:"user"};
+let P = {...blank};
+try { const s = localStorage.getItem(KEY); if (s) P = {...blank, ...JSON.parse(s)}; } catch(e){}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch(e){} };
+const dayKey = (d=new Date()) => d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();
+const yKey = () => { const d=new Date(); d.setDate(d.getDate()-1); return dayKey(d); };
+const streakNow = () => (P.lastDay===dayKey()||P.lastDay===yKey()) ? P.streak : 0;
+
+// ---------------- tree ----------------
+function rnd(i){ const x = Math.sin(i*127.1+311.7)*43758.5453; return x - Math.floor(x); }
+const TC = {bark:"#C79A6E", ground:"rgba(255,255,255,0.12)", leaf:"#6FD496", leaf2:"#46B06F", flower:"#F7A9C4", fruit:"#F4C252"};
+function drawTree(c, cx, gy, scale, g, time){
+  const depth = Math.min(9, 0.35 + g*0.5), grow = Math.min(1, 0.45 + g/24), base = scale*0.2*grow, tips = [];
+  function br(x,y,len,ang,d,idx){
+    const f = Math.max(0, Math.min(1, depth-d)); if (f<=0) return;
+    const a = ang + Math.sin(time*1.3+d*0.7+idx*0.3)*0.012*d, L = len*f;
+    const x2 = x+Math.sin(a)*L, y2 = y-Math.cos(a)*L;
+    c.strokeStyle = TC.bark; c.lineCap = "round";
+    c.lineWidth = Math.max(1.2, scale*0.028*Math.pow(0.68,d)*(0.5+0.5*grow));
+    c.beginPath(); c.moveTo(x,y); c.lineTo(x2,y2); c.stroke();
+    if (f<1 || d+1>=depth) tips.push({x:x2,y:y2,idx,d,f});
+    if (f>=1) { const n = rnd(idx)>0.78 && d>1 ? 3 : 2;
+      for (let k=0;k<n;k++){ const sp = 0.32+rnd(idx*7+k)*0.28;
+        const ca = n===3 ? (k-1)*sp : (k ? sp : -sp*(0.8+rnd(idx+k)*0.4));
+        br(x2,y2,len*(0.7+rnd(idx*3+k)*0.12), a+ca+(rnd(idx*11)-0.5)*0.15, d+1, idx*3+k+1); } }
+  }
+  c.fillStyle = TC.ground; c.beginPath(); c.ellipse(cx, gy+scale*0.012, scale*0.34, scale*0.045, 0, 0, Math.PI*2); c.fill();
+  if (g < 0.15) { c.fillStyle = TC.bark; c.beginPath(); c.ellipse(cx, gy-scale*0.012, scale*0.024, scale*0.017, 0, 0, Math.PI*2); c.fill(); }
+  br(cx, gy, base, 0, 0, 1);
+  const lr = scale*(0.018+0.03*Math.min(1,g/14));
+  for (const t of tips) { if (g<0.4) continue;
+    const r = lr*(0.6+t.f*0.6)*(0.8+rnd(t.idx*5)*0.5);
+    c.fillStyle = rnd(t.idx*13)>0.5 ? TC.leaf : TC.leaf2;
+    c.beginPath(); c.arc(t.x,t.y,r,0,Math.PI*2); c.fill();
+    if (g<6 && t.d<2){ c.beginPath(); c.ellipse(t.x-r*0.9,t.y+r*0.2,r*0.9,r*0.45,-0.5,0,Math.PI*2); c.fill();
+      c.beginPath(); c.ellipse(t.x+r*0.9,t.y+r*0.2,r*0.9,r*0.45,0.5,0,Math.PI*2); c.fill(); } }
+  if (g>=19) for (const t of tips) if (rnd(t.idx*17) < Math.min(0.55,(g-19)*0.08)) { c.fillStyle=TC.flower; c.beginPath(); c.arc(t.x+lr*0.4,t.y-lr*0.3,lr*0.38,0,Math.PI*2); c.fill(); }
+  if (g>=29) for (const t of tips) if (rnd(t.idx*23) < Math.min(0.45,(g-29)*0.05+0.1)) { c.fillStyle=TC.fruit; c.beginPath(); c.arc(t.x-lr*0.3,t.y+lr*0.5,lr*0.42,0,Math.PI*2); c.fill(); }
+}
+
+// ---------------- timer ----------------
+const PRESETS = [{focus:25*60,brk:5*60,min:25},{focus:50*60,brk:10*60,min:50},{focus:20,brk:10,min:1,demo:true}];
+let mode = "focus", running = false, endAt = 0, remain = PRESETS[P.preset].focus;
+const total = () => mode==="focus" ? PRESETS[P.preset].focus : PRESETS[P.preset].brk;
+const fmt = s => { s = Math.max(0, Math.ceil(s)); return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0"); };
+
+// ---------------- camera ----------------
+let stream = null, camOn = false;
+async function startCam(){
+  try {
+    stream?.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:P.facing, width:{ideal:1280}, height:{ideal:720}}, audio:false});
+    cam.srcObject = stream; await cam.play().catch(()=>{});
+    camOn = true; return true;
+  } catch(e) { camOn = false; return e; }
+}
+$("camOnBtn").onclick = async () => {
+  unlockAudio();
+  if (!navigator.mediaDevices?.getUserMedia) { $("welcomeStatus").textContent = "このページではカメラが使えません。https のアドレスでSafariから開いてください。"; $("welcomeStatus").className="status err"; return; }
+  $("welcomeStatus").textContent = "カメラを起動しています…";
+  const r = await startCam();
+  if (r === true) $("welcome").hidden = true;
+  else { $("welcomeStatus").textContent = "カメラを使えませんでした。設定 > Safari > カメラ で「許可」にしてから再読み込みしてください。"; $("welcomeStatus").className = "status err"; }
+};
+$("noCamBtn").onclick = () => { unlockAudio(); $("welcome").hidden = true; };
+$("flipBtn").onclick = async () => { P.facing = P.facing === "user" ? "environment" : "user"; save(); if (camOn || stream) await startCam(); };
+
+// ---------------- recording (timelapse frames) ----------------
+let frames = [], capIdx = 0, capInterval = 1, capBusy = 0;
+function resetCapture(){ frames = []; capIdx = 0; const n = Math.round((P.vlen - 2.5) * 30); capInterval = PRESETS[P.preset].focus / n; }
+const recording = () => P.rec && mode === "focus" && running;
+
+// ---------------- compose one frame of the screen ----------------
+let shownG = levelInfo(P.totalXp).g, popUntil = 0, popText = "";
+function compose(now){
+  const t = now/1000;
+  // camera
+  if (camOn && cam.videoWidth) {
+    const vw = cam.videoWidth, vh = cam.videoHeight, s = Math.max(W/vw, H/vh), w = vw*s, h = vh*s;
+    ctx.save();
+    if (P.mirror && P.facing === "user") { ctx.translate(W,0); ctx.scale(-1,1); }
+    ctx.drawImage(cam, (W-w)/2, (H-h)/2, w, h); ctx.restore();
+  } else {
+    const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,"#13261C"); g.addColorStop(1,"#08110D");
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  }
+  // shades so text reads on any background
+  let sh = ctx.createLinearGradient(0,0,0,300); sh.addColorStop(0,"rgba(0,0,0,.5)"); sh.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle = sh; ctx.fillRect(0,0,W,300);
+  sh = ctx.createLinearGradient(0,H-700,0,H); sh.addColorStop(0,"rgba(0,0,0,0)"); sh.addColorStop(1,"rgba(0,0,0,.62)");
+  ctx.fillStyle = sh; ctx.fillRect(0,H-700,W,700);
+
+  // live xp: what you've earned so far this set counts toward the tree in real time
+  const pr = PRESETS[P.preset];
+  const earned = mode==="focus" ? (pr.demo ? 5 : pr.min) * (1 - remain/total()) : 0;
+  const L = levelInfo(P.totalXp + earned);
+  shownG += (L.g - shownG) * 0.08;
+
+  // top: level + xp bar
+  ctx.textAlign = "left"; ctx.fillStyle = "#fff";
+  ctx.font = "900 38px 'Zen Maru Gothic', sans-serif";
+  ctx.fillText("Lv." + L.lv, 84, 150);
+  const lvW = ctx.measureText("Lv." + L.lv).width;
+  ctx.font = "700 26px 'Zen Maru Gothic', sans-serif"; ctx.fillStyle = "#6FD496";
+  ctx.fillText(stageOf(L.lv).name, 84 + lvW + 14, 148);
+  ctx.fillStyle = "rgba(255,255,255,.22)"; rr(84, 170, 300, 10, 5); ctx.fill();
+  ctx.fillStyle = "#6FD496"; rr(84, 170, 300 * (L.xpIn / L.xpNeed), 10, 5); ctx.fill();
+  ctx.font = "500 20px 'Noto Sans JP', sans-serif"; ctx.fillStyle = "rgba(255,255,255,.8)";
+  ctx.fillText(`${Math.max(1,streakNow())}日連続 ・ 今日${P.todayDay===dayKey()?P.todaySets:0}セット`, 84, 212);
+
+  // REC badge
+  if (recording()) {
+    ctx.textAlign = "right"; ctx.font = "500 22px 'DM Mono', monospace";
+    const blink = Math.floor(t*1.5)%2 === 0;
+    ctx.fillStyle = "rgba(0,0,0,.45)"; rr(W-280, 124, 196, 42, 21); ctx.fill();
+    ctx.fillStyle = blink ? "#F0524A" : "rgba(240,82,74,.35)"; ctx.beginPath(); ctx.arc(W-256, 145, 8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.fillText(`REC ×${Math.round(pr.focus/(P.vlen-2.5))}`, W-100, 153);
+  }
+
+  // tree card (bottom-left)
+  const cx0 = 84, cy0 = H - 600, cw = 230, chh = 230;
+  ctx.fillStyle = "rgba(10,20,15,.55)"; rr(cx0, cy0, cw, chh, 28); ctx.fill();
+  ctx.save(); rr(cx0, cy0, cw, chh, 28); ctx.clip();
+  drawTree(ctx, cx0 + cw/2, cy0 + chh - 34, 300, shownG, t);
+  ctx.restore();
+
+  // timer (bottom-right)
+  ctx.textAlign = "right";
+  ctx.font = "700 26px 'Zen Maru Gothic', sans-serif";
+  ctx.fillStyle = mode==="focus" ? "#6FD496" : "#7FB0DD";
+  ctx.fillText(mode==="focus" ? "集中" : "休憩", W-88, H-520);
+  ctx.fillStyle = "#fff"; ctx.font = "500 118px 'DM Mono', monospace";
+  ctx.fillText(fmt(remain), W-82, H-400);
+  // progress bar
+  ctx.fillStyle = "rgba(255,255,255,.2)"; rr(84, H-350, W-168, 8, 4); ctx.fill();
+  ctx.fillStyle = mode==="focus" ? "#6FD496" : "#7FB0DD"; rr(84, H-350, (W-168)*(1-remain/total()), 8, 4); ctx.fill();
+
+  // pop (level up / xp)
+  if (now < popUntil) {
+    const k = 1 - (popUntil - now)/2600, sc = 1 + Math.sin(Math.min(1,k*4)*Math.PI)*0.12;
+    ctx.save(); ctx.globalAlpha = k > .85 ? (1-k)/.15 : 1; ctx.translate(W/2, H*0.42); ctx.scale(sc, sc);
+    ctx.font = "900 64px 'Zen Maru Gothic', sans-serif"; ctx.textAlign = "center";
+    const tw = ctx.measureText(popText).width + 64;
+    ctx.fillStyle = "#F2BA4E"; rr(-tw/2, -58, tw, 92, 46); ctx.fill();
+    ctx.fillStyle = "#2A1D05"; ctx.fillText(popText, 0, 8); ctx.restore();
+  }
+}
+function rr(x,y,w,h,r){ ctx.beginPath(); w = Math.max(0,w); if (ctx.roundRect) ctx.roundRect(x,y,w,h,Math.min(r,w/2)); else ctx.rect(x,y,w,h); }
+
+// ---------------- main loop ----------------
+function loop(now){
+  if (running) {
+    remain = (endAt - Date.now())/1000;
+    if (remain <= 0) { remain = 0; running = false; if (mode === "focus") finishFocus(); else finishBreak(); }
+  }
+  compose(now);
+  if (recording()) {
+    const elapsed = total() - remain;
+    if (elapsed >= capIdx * capInterval && capBusy < 4) {
+      capIdx++; capBusy++;
+      stage.toBlob(b => { capBusy--; if (b) frames.push(b); }, "image/jpeg", 0.72);
+    }
+  }
+  updateButtons();
+  requestAnimationFrame(loop);
+}
+
+// ---------------- controls ----------------
+let wake = null;
+async function lockWake(){ try { wake = await navigator.wakeLock?.request("screen"); } catch(e){} }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && running) lockWake(); });
+function updateButtons(){
+  const b = $("startBtn");
+  const label = running ? "一時停止" : remain < total() ? "再開" : mode === "focus" ? "集中スタート" : "休憩スタート";
+  if (b.textContent !== label) b.textContent = label;
+  b.classList.toggle("rest", mode !== "focus");
+}
+$("startBtn").onclick = () => {
+  unlockAudio();
+  if (running) { running = false; remain = Math.max(0,(endAt-Date.now())/1000); try{wake?.release()}catch(e){} return; }
+  if (mode === "focus" && remain >= total()) resetCapture();
+  running = true; endAt = Date.now() + remain*1000; lockWake();
+};
+$("resetBtn").onclick = () => { running = false; mode = "focus"; remain = PRESETS[P.preset].focus; frames = []; };
+
+// settings
+function syncChips(){
+  document.querySelectorAll("#presetChips .chip").forEach(c => c.setAttribute("aria-pressed", +c.dataset.v === P.preset));
+  document.querySelectorAll("#lenChips .chip").forEach(c => c.setAttribute("aria-pressed", +c.dataset.v === P.vlen));
+  $("hookIn").value = P.hook; $("recToggle").checked = P.rec; $("mirrorToggle").checked = P.mirror;
+}
+$("setBtn").onclick = () => { syncChips(); $("settings").hidden = false; };
+$("setClose").onclick = () => { P.hook = $("hookIn").value; save(); $("settings").hidden = true; };
+document.querySelectorAll("#presetChips .chip").forEach(c => c.onclick = () => {
+  if (running) return; P.preset = +c.dataset.v; mode = "focus"; remain = PRESETS[P.preset].focus; save(); syncChips(); });
+document.querySelectorAll("#lenChips .chip").forEach(c => c.onclick = () => { if (running) return; P.vlen = +c.dataset.v; save(); syncChips(); });
+$("recToggle").onchange = e => { P.rec = e.target.checked; save(); };
+$("mirrorToggle").onchange = e => { P.mirror = e.target.checked; save(); };
+$("statsBtn").onclick = () => {
+  $("sTotal").textContent = P.totalMin; $("sSets").textContent = P.sets; $("sBest").textContent = P.best;
+  const L = levelInfo(P.totalXp); $("stageLine").textContent = `いまは Lv.${L.lv}「${stageOf(L.lv).name}」 ・ 次のレベルまで ${L.xpNeed - L.xpIn}XP`;
+  $("statsSheet").hidden = false; };
+$("statsClose").onclick = () => $("statsSheet").hidden = true;
+
+// sound
+let actx = null;
+function unlockAudio(){ try { actx = actx || new (window.AudioContext||window.webkitAudioContext)(); actx.resume(); } catch(e){} }
+function chime(){ if (!actx) return;
+  [660,880,1320].forEach((f,i) => { const o = actx.createOscillator(), g = actx.createGain(), t0 = actx.currentTime + i*0.18;
+    o.frequency.value = f; g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.25,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.5);
+    o.connect(g).connect(actx.destination); o.start(t0); o.stop(t0+0.55); }); }
+
+// ---------------- finishing ----------------
+let session = null;
+function finishFocus(){
+  const pr = PRESETS[P.preset], before = levelInfo(P.totalXp), today = dayKey();
+  if (P.lastDay !== today) { P.streak = P.lastDay === yKey() ? P.streak + 1 : 1; P.lastDay = today; }
+  if (P.todayDay !== today) { P.todayDay = today; P.todaySets = 0; }
+  const gain = pr.demo ? 5 : pr.min + 10 + (P.streak >= 3 ? 5 : 0);
+  P.totalXp += gain; P.totalMin += pr.demo ? 0 : pr.min; P.sets++; P.todaySets++; P.best = Math.max(P.best, P.streak);
+  save();
+  const after = levelInfo(P.totalXp);
+  session = {gain, lv0: before.lv, lv1: after.lv, stage: stageOf(after.lv).name, streak: P.streak, totalMin: P.totalMin, todaySets: P.todaySets, min: pr.min};
+  popText = after.lv > before.lv ? `LEVEL UP!  Lv.${after.lv}` : `+${gain} XP`;
+  popUntil = performance.now() + 2600;
+  chime();
+  mode = "brk"; remain = pr.brk;
+  // let the pop render into the last frames, then build the video
+  setTimeout(() => { if (P.rec && frames.length > 10) buildVideo(); }, 1200);
+}
+function finishBreak(){ chime(); mode = "focus"; remain = PRESETS[P.preset].focus; popText = "休憩おわり。次のセットへ"; popUntil = performance.now()+2600; }
+
+function pickMime(){
+  for (const m of ["video/mp4;codecs=avc1.42E01E","video/mp4;codecs=avc1","video/mp4","video/webm;codecs=vp9","video/webm"])
+    try { if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m; } catch(e){}
+  return "";
+}
+let outFile = null;
+async function buildVideo(){
+  const sheet = $("result"); sheet.hidden = false;
+  $("resTitle").textContent = "早送り動画をつくっています";
+  $("resVideo").hidden = true; $("shareBtn").hidden = true; $("resClose").hidden = true;
+  const st = $("resStatus"); st.className = "status"; st.textContent = "アプリを開いたままお待ちください（動画の長さと同じくらいかかります）";
+  const bar = $("resProg"); bar.hidden = false; bar.firstElementChild.style.width = "0%";
+  const enc = document.createElement("canvas"); enc.width = W; enc.height = H;
+  const ec = enc.getContext("2d");
+  if (!window.MediaRecorder || !enc.captureStream) { st.textContent = "このブラウザは動画の書き出しに対応していません。iOS 15以降のSafariで開いてください。"; st.className="status err"; $("resClose").hidden=false; return; }
+  const mime = pickMime(), ext = mime.includes("mp4") ? "mp4" : "webm";
+  const list = frames.slice(); frames = [];
+  const s = session;
+  const vs = enc.captureStream(30);
+  const rec = new MediaRecorder(vs, mime ? {mimeType:mime, videoBitsPerSecond:5_000_000} : undefined);
+  const chunks = []; rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  const stopped = new Promise(r => rec.onstop = r);
+  const END = 75; // 2.5s end card
+  const totalF = list.length + END;
+  let last = null;
+  // draw first frame before starting so the video never opens on black
+  last = await createImageBitmap(list[0]); ec.drawImage(last, 0, 0);
+  rec.start(500);
+  const t0 = performance.now();
+  for (let i = 0; i < totalF; i++) {
+    const due = t0 + i * (1000/30);
+    if (i < list.length) {
+      try { const bmp = await createImageBitmap(list[i]); last?.close?.(); last = bmp; } catch(e){}
+      ec.drawImage(last, 0, 0);
+      if (i < 60) hookOverlay(ec, i/30);
+    } else endCard(ec, last, (i - list.length)/30, s);
+    bar.firstElementChild.style.width = (i/totalF*100) + "%";
+    const wait = due + 1000/30 - performance.now();
+    await new Promise(r => setTimeout(r, Math.max(0, wait)));
+  }
+  rec.stop(); await stopped;
+  const blob = new Blob(chunks, {type: mime || "video/webm"});
+  outFile = new File([blob], `集中の木_${dayKey()}_${s.todaySets}.${ext}`, {type: blob.type});
+  const v = $("resVideo"); v.src = URL.createObjectURL(blob); v.hidden = false; v.play().catch(()=>{});
+  bar.hidden = true;
+  $("resTitle").textContent = "動画ができました";
+  st.textContent = `${P.vlen}秒の早送り動画（${ext.toUpperCase()}）。「写真に保存・シェア」から「ビデオを保存」を選ぶと写真アプリに入ります。`;
+  $("shareBtn").hidden = false; $("resClose").hidden = false;
+}
+function hookOverlay(c, t){
+  const a = t < 0.3 ? t/0.3 : t > 1.7 ? Math.max(0,(2-t)/0.3) : 1;
+  if (!P.hook || a <= 0) return;
+  c.save(); c.globalAlpha = a; c.textAlign = "center";
+  c.font = "900 60px 'Zen Maru Gothic', sans-serif";
+  const lines = wrap(c, P.hook, 620);
+  const bh = lines.length*80 + 50, by = H*0.36 - bh/2;
+  c.fillStyle = "rgba(0,0,0,.55)"; c.beginPath(); c.roundRect ? c.roundRect(40, by, W-80, bh, 30) : c.rect(40,by,W-80,bh); c.fill();
+  c.fillStyle = "#fff"; lines.forEach((ln,i) => c.fillText(ln, W/2, by + 85 + i*80));
+  c.restore();
+}
+function endCard(c, bmp, t, s){
+  if (bmp) c.drawImage(bmp, 0, 0);
+  const a = Math.min(1, t/0.4);
+  c.fillStyle = `rgba(6,14,10,${0.72*a})`; c.fillRect(0,0,W,H);
+  c.save(); c.globalAlpha = a; c.textAlign = "center";
+  const k = Math.min(1, t/0.5), sc = 1 + Math.sin(k*Math.PI)*0.12;
+  c.translate(W/2, H*0.40); c.scale(sc, sc);
+  const txt = s.lv1 > s.lv0 ? `LEVEL UP!  Lv.${s.lv1}` : `+${s.gain} XP`;
+  c.font = "900 70px 'Zen Maru Gothic', sans-serif";
+  const tw = c.measureText(txt).width + 70;
+  c.fillStyle = "#F2BA4E"; c.beginPath(); c.roundRect ? c.roundRect(-tw/2,-62,tw,98,49) : c.rect(-tw/2,-62,tw,98); c.fill();
+  c.fillStyle = "#2A1D05"; c.fillText(txt, 0, 10);
+  c.restore();
+  c.save(); c.globalAlpha = Math.min(1, Math.max(0,(t-0.4)/0.4)); c.textAlign = "center"; c.fillStyle = "#fff";
+  c.font = "700 46px 'Zen Maru Gothic', sans-serif";
+  c.fillText(s.min ? `${s.min}分の集中、完了。` : "1セット完了。", W/2, H*0.54);
+  c.font = "500 28px 'Noto Sans JP', sans-serif"; c.fillStyle = "rgba(255,255,255,.8)";
+  c.fillText(`${s.streak}日連続 ・ 今日${s.todaySets}セット目 ・ 累計${s.totalMin}分`, W/2, H*0.54 + 60);
+  c.fillText(`木：Lv.${s.lv1}「${s.stage}」`, W/2, H*0.54 + 104);
+  c.restore();
+}
+function wrap(c, text, maxW){ const out=[]; let line=""; for (const ch of text){ if (c.measureText(line+ch).width > maxW && line){ out.push(line); line=ch; } else line+=ch; } if (line) out.push(line); return out; }
+
+$("shareBtn").onclick = async () => {
+  if (!outFile) return;
+  try {
+    if (navigator.canShare && navigator.canShare({files:[outFile]})) { await navigator.share({files:[outFile]}); return; }
+  } catch(e){ if (e.name === "AbortError") return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(outFile); a.download = outFile.name;
+  document.body.appendChild(a); a.click(); a.remove();
+};
+$("resClose").onclick = () => { $("result").hidden = true; };
+
+if (P.facing !== "user" && P.facing !== "environment") P.facing = "user";
+remain = PRESETS[P.preset].focus;
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
