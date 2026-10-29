@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.ggpht.com https://*.googleusercontent.com https://*.ytimg.com; connect-src https://www.googleapis.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>集中の森ライブ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Klee+One:wght@600&family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap">
@@ -199,7 +201,7 @@ body{background:#1F1F1C;color:var(--ink);font-family:var(--f-body);overflow:hidd
 .panel .st{font-size:12px;color:#2F8A55}
 .panel .st.err{color:#C2412F}
 .panel button:focus-visible,.panel input:focus-visible,.panel select:focus-visible{outline:2px solid #E9A62B;outline-offset:1px}
-.show-panel{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:max(12px,env(safe-area-inset-bottom,0px));z-index:19;font:600 12px var(--f-body);border:0;border-radius:99px;padding:8px 14px;background:rgba(255,255,255,.85);cursor:pointer;opacity:.25}
+.show-panel{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:max(12px,env(safe-area-inset-bottom,0px));z-index:19;font:600 12px var(--f-body);border:0;border-radius:99px;padding:8px 14px;background:rgba(255,255,255,.85);cursor:pointer;opacity:0}
 .show-panel:hover,.show-panel:focus-visible{opacity:1}
 </style>
 
@@ -302,16 +304,17 @@ body{background:#1F1F1C;color:var(--ink);font-family:var(--f-body);overflow:hidd
     <h4>コメントの管理</h4>
     <label class="note" for="ngIn">NGワード（この言葉を含むコメントは画面に出しません。「、」で区切る）</label>
     <input type="text" id="ngIn" placeholder="例：宣伝、http">
-    <div class="note">3時間コメントがない人は、自動で退室になります。</div>
+    <div class="row"><button id="linkBtn" aria-pressed="true">URL入りのコメントを出さない</button></div>
+    <div class="note">3時間コメントがない人は自動で退室になります。同じ人が30秒に7回以上コメントした分は表示しません。</div>
     <div class="row"><button id="rankReset">今週のランキングを消す</button></div>
   </section>
   <section>
     <h4>YouTubeライブのコメント</h4>
     <input type="text" id="ytVideo" placeholder="ライブのURL または 動画ID">
-    <input type="password" id="ytKey" placeholder="YouTube Data API キー">
+    <input type="password" id="ytKey" placeholder="YouTube Data API キー" autocomplete="off" spellcheck="false">
     <div class="row"><button class="primary" id="ytConnect">接続する</button><button id="ytStop">切断</button></div>
     <div class="st" id="ytSt"></div>
-    <div class="note">APIキーはこのパソコンのブラウザにだけ保存されます。無料枠の範囲で約2〜3時間の配信を読めます（読み込み間隔：約6秒）。</div>
+    <div class="note">APIキーはこのパソコンのブラウザにだけ保存されます。接続すると、このパネルは自動で隠れます（Hキーで再表示）。無料枠の範囲で約2〜3時間の配信を読めます（読み込み間隔：約6秒）。</div>
   </section>
   <section>
     <h4>テスト・デモ</h4>
@@ -419,7 +422,8 @@ const SLOTS = [[110,90],[300,50],[130,250],[320,210],[110,400],[240,400]];
 const PASTEL = ["#FCEFC7","#DDEBFA","#FBE0E4","#E3F1E4","#EFE4F7"];
 function hue(k){ let h = 0; for (const c of String(k)) h = (h*31 + c.charCodeAt(0)) >>> 0; return PASTEL[h % PASTEL.length]; }
 function initial(n){ return (n || "?").trim().replace(/^@/,"").charAt(0).toUpperCase(); }
-function avatarHTML(p, cls){ return p.img ? `<img src="${p.img}" alt="" referrerpolicy="no-referrer">` : esc(initial(p.name)); }
+const SAFE_IMG = /^https:\/\/[a-z0-9.-]+\.(ggpht\.com|googleusercontent\.com|ytimg\.com)\/[^\s"'<>]*$/i;
+function avatarHTML(p, cls){ return p.img && SAFE_IMG.test(p.img) ? `<img src="${esc(p.img)}" alt="" referrerpolicy="no-referrer">` : esc(initial(p.name)); }
 function hon(n){ n = String(n || "ゲスト"); return /(さん|くん|君|ちゃん|様|さま)$/.test(n) ? n : n + "さん"; }
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function renderRoom(){
@@ -432,7 +436,7 @@ function renderRoom(){
   shown.forEach((p, i) => {
     let el = [...box.children].find(e => e._k === p.key);
     if (!el) { el = document.createElement("div"); el._k = p.key;
-      el.innerHTML = `<div class="bubble"></div><span class="badge" hidden></span><div class="av">${avatarHTML(p)}</div><div class="pname">${esc(p.name)}</div><div class="pmin"></div>`; }
+      el.innerHTML = `<div class="bubble"></div><span class="badge" hidden></span><div class="av">${avatarHTML(p)}</div><div class="pname">${esc(String(p.name).slice(0,20))}</div><div class="pmin"></div>`; }
     const bd = el.children[1], bt = p.done ? "✔" : p.first ? "初" : "";
     if (bd._t !== bt) { bd._t = bt; bd.textContent = bt; bd.hidden = !bt; bd.className = "badge " + (p.done ? "done" : "new"); }
     if (box.children[i] !== el) box.insertBefore(el, box.children[i] || null);
@@ -469,6 +473,16 @@ const isDemoKey = k => /^(demo|test)-/.test(String(k));
 const AUTO_OUT = 3 * 60 * 60 * 1000; // 3 hours without a comment
 let ngWords = store.get("ng", []);
 const seen = store.get("seen", {}), seenDemo = new Set();
+{ const ks = Object.keys(seen); if (ks.length > 3000) ks.slice(0, ks.length - 3000).forEach(k => delete seen[k]); } // keep storage small
+let hideLinks = store.get("hideLinks", true);
+const recent = new Map(); // key -> timestamps of recent comments
+function tooFast(key){
+  const now = Date.now(), list = (recent.get(key) || []).filter(x => now - x < 30000);
+  list.push(now); recent.set(key, list);
+  if (recent.size > 2000) recent.clear();
+  return list.length > 6; // more than 6 comments in 30 seconds
+}
+let lastClap = 0, lastPet = 0;
 function onComment(c){ // {key, name, img, text, isHost}
   const t = c.text.trim();
   if (c.isHost && /^!(start|break|reset|skip)\b/i.test(t)) {
@@ -480,8 +494,11 @@ function onComment(c){ // {key, name, img, text, isHost}
     return;
   }
   if (ngWords.some(w => w && t.toLowerCase().includes(w.toLowerCase()))) return; // NG word: drop silently
+  if (hideLinks && /(https?:\/\/|www\.|\.(com|jp|net|io|ly|me)\b)/i.test(t)) return; // links: drop
+  if (!c.isHost && tooFast(c.key)) return; // one person flooding the chat
+  if (t.length > 120) c.text = t.slice(0, 120) + "…";
   if (c.isHost && /^!(open|end|main)\b/i.test(t)) { const k = t.slice(1).toLowerCase(); setScreen(k.startsWith("open") ? "open" : k.startsWith("end") ? "end" : "main"); return; }
-  pushMsg(`<div class="mav">${avatarHTML(c)}</div><div><div class="mh"><b>${esc(c.name)}</b><span>${hhmm()}</span></div><div class="mt">${esc(t)}</div></div>`);
+  pushMsg(`<div class="mav">${avatarHTML(c)}</div><div><div class="mh"><b>${esc(String(c.name).slice(0,30))}</b><span>${hhmm()}</span></div><div class="mt">${esc(c.text)}</div></div>`);
   let p = people.get(c.key);
   if (RE_START.test(t)) {
     if (!p) { p = {key:c.key, name:c.name, img:c.img, since:Date.now(), lastSeen:Date.now(), status:"focus", bubble:"", bubbleUntil:0, credited:0}; people.set(c.key, p);
@@ -516,6 +533,7 @@ function onComment(c){ // {key, name, img, text, isHost}
 // ---------- effects ----------
 function clap(){
   const fx = $("fx");
+  if (Date.now() - lastClap < 2500 || fx.childElementCount > 60) return; lastClap = Date.now();
   for (let i = 0; i < 14; i++) {
     const s = document.createElement("span");
     s.textContent = "👏"; s.className = "clap";
@@ -526,6 +544,7 @@ function clap(){
 }
 function pet(){
   const cam = $("cam");
+  if (Date.now() - lastPet < 2000) return; lastPet = Date.now();
   for (let i = 0; i < 7; i++) {
     const h = document.createElement("span"); h.className = "heart"; h.textContent = "♥";
     h.style.left = (520 + Math.random()*90) + "px"; h.style.top = (850 + Math.random()*30) + "px";
@@ -560,7 +579,7 @@ $("bgmBreakBtn").onclick = e => { bgmBreakOnly = !bgmBreakOnly; e.target.setAttr
 let stream = null, mirror = true;
 async function listCams(){
   try { const ds = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
-    const sel = $("camSel"); sel.innerHTML = ds.map((d,i) => `<option value="${d.deviceId}">${esc(d.label || "カメラ " + (i+1))}</option>`).join(""); sel.hidden = ds.length < 2;
+    const sel = $("camSel"); sel.innerHTML = ds.map((d,i) => `<option value="${esc(d.deviceId)}">${esc(d.label || "カメラ " + (i+1))}</option>`).join(""); sel.hidden = ds.length < 2;
     if (stream) sel.value = stream.getVideoTracks()[0]?.getSettings().deviceId || ""; } catch(e){}
 }
 async function camOn(deviceId){
@@ -648,6 +667,7 @@ async function ytConnect(){
     setDemo(false);
     $("chatH").classList.add("live"); $("chatState").textContent = "ライブ接続中";
     ytSt("接続しました。コメントを読み込んでいます");
+    setTimeout(() => setPanel(false), 1500); // hide the panel (and the key field) once live
     ytPoll();
   } catch(e) { ytSt("通信できませんでした。このプレビュー画面からは接続できません。公開したページで試してください", true); }
 }
@@ -655,7 +675,7 @@ async function ytPoll(){
   if (!yt.on) return;
   let wait = 6000;
   try {
-    const r = await fetch(`https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${yt.chatId}&part=snippet,authorDetails&maxResults=200${yt.token ? "&pageToken=" + yt.token : ""}&key=${encodeURIComponent($("ytKey").value.trim())}`);
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${encodeURIComponent(yt.chatId)}&part=snippet,authorDetails&maxResults=200${yt.token ? "&pageToken=" + encodeURIComponent(yt.token) : ""}&key=${encodeURIComponent($("ytKey").value.trim())}`);
     const j = await r.json();
     if (j.error) { ytSt("読み込みエラー：" + (j.error.message || ""), true); if (/quota/i.test(j.error.message||"")) { yt.on = false; return; } wait = 15000; }
     else {
@@ -686,7 +706,7 @@ let today = store.get("today", {day:"", min:0, people:[]}); if (today.day !== da
 const demoRank = {}, demoPeople = new Set(); let demoToday = 0;
 function credit(p, dt){
   const demo = isDemoKey(p.key), R = demo ? demoRank : rank.users;
-  const u = R[p.key] || (R[p.key] = {name:p.name, min:0}); u.name = p.name; u.min += dt;
+  const u = R[p.key] || (R[p.key] = {name:String(p.name).slice(0,20), min:0}); u.name = String(p.name).slice(0,20); u.min += dt;
   if (demo) demoToday += dt; else today.min += dt;
 }
 const fmtMin = m => { m = Math.floor(m); const h = Math.floor(m/60); return h ? `${h}時間${m%60}分` : `${m}分`; };
@@ -711,6 +731,8 @@ $("rankReset").onclick = e => {
 
 // ---------- NG words ----------
 $("ngIn").value = ngWords.join("、");
+$("linkBtn").setAttribute("aria-pressed", hideLinks);
+$("linkBtn").onclick = () => { hideLinks = !hideLinks; store.set("hideLinks", hideLinks); $("linkBtn").setAttribute("aria-pressed", hideLinks); };
 $("ngIn").oninput = () => { ngWords = $("ngIn").value.split(/[、,，\s]+/).map(w => w.trim()).filter(Boolean); store.set("ng", ngWords); };
 
 // ---------- opening / closing screens ----------
